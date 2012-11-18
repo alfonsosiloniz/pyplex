@@ -131,7 +131,7 @@ class xbmcCommands:
         
     def ContextMenu(self, message):
         global cgcmd
-        cgcmd.SendCommand(2);
+        cgcmd.SendCommand(17);
 
     def ParentDir(self, message):
         global cgcmd
