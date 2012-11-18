@@ -1,13 +1,19 @@
 import web, urllib2, re, xml.etree.cElementTree as et
-from pyomxplayer import OMXPlayer
 from urlparse import urlparse
 import avahi, dbus, sys
 from pprint import pprint
-import socket, pygame.image, pygame.display, subprocess, signal, os, logging
+import socket,  subprocess, signal, os, logging
 from threading import Thread
 import Queue
 import udplistener
 import httplistener
+
+logger = logging.getLogger('myapp')
+hdlr = logging.FileHandler('/var/log/pyplex.log')
+formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+hdlr.setFormatter(formatter)
+logger.addHandler(hdlr)
+logger.setLevel(logging.INFO)
 
 __all__ = ["ZeroconfService"]
 class ZeroconfService:
@@ -44,7 +50,7 @@ class ZeroconfService:
 
         g.Commit()
         self.group = g
-        print 'Service published'
+        logger.info( 'Service published' )
 
     def unpublish(self):
         self.group.Reset()
@@ -68,30 +74,44 @@ class xbmcCommands:
         global omxCommand
         global media_key
         global duration
-        #print '---'
-        #print fullpath
-        #print tag
+        logger.info ( '---')
+        logger.info ( fullpath)
+        logger.info ( tag)
         f = urllib2.urlopen(fullpath)
         s = f.read()
         f.close()
-        #print s
+        logger.info( s)
         tree = et.fromstring(s)
         #get video
         el = tree.find('./Video/Media/Part')
         key = tree.find('./Video')
         key = key.attrib['ratingKey']
-        print key
+        logger.info( key)
         #print el.attrib['key']
-        print 'fullpath', fullpath
+        logger.info(fullpath)
         #Construct the path to the media.
         parsed_path = urlparse(fullpath)
         media_key = key
         duration = int(el.attrib['duration'])
         mediapath = parsed_path.scheme + "://" + parsed_path.netloc + el.attrib['key'] 
-        #print 'mediapath', mediapath
-        if(omx):
-            self.stop()
-        omx = OMXPlayer(mediapath, args=omxCommand, start_playback=True)
+        logger.info( mediapath)
+        #if(omx):
+        #    self.stop()
+        #omx = OMXPlayer(mediapath, args=omxCommand, start_playback=True)
+        try:
+          sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        except socket.error, msg:
+          sys.stderr.write("[ERROR] %s\n" % msg[1])
+          sys.exit(1)
+               
+        try:
+          sock.connect(("localhost", 9010))
+        except socket.error, msg:
+          sys.stderr.write("[ERROR] %s\n" % msg[1])
+          sys.exit(2)
+                      
+        sock.send("V|%s\r\n" % (mediapath))
+                       
 
     def Pause(self, message):
         global omx
@@ -108,13 +128,13 @@ class xbmcCommands:
 
     def Stop(self, message):
         global omx
+        logger.info("Han mandado STOP")
         if(omx):
             omx.stop()
 
     def stopPyplex(self, message):
         self.stop()
         global service
-        pygame.quit()
         exit()
 
     def SkipNext(self, message = None):
@@ -141,19 +161,6 @@ class xbmcCommands:
         if(omx):
             omx.jump_rev_600()
         
-class image:
-    def __init__(self, picture):
-        # pygame.init()
-        self.picture = pygame.image.load(picture)
-        self.picture = pygame.transform.scale(self.picture,(1280,1024))
-
-    def set(self):
-        # pygame.mouse.set_visible(False)
-        pygame.display.set_mode(self.picture.get_size())
-        main_surface = pygame.display.get_surface()
-        main_surface.blit(self.picture, (0, 0))
-        pygame.display.update()
-
 def OMXRunning():
     global pid
     p = subprocess.Popen(['ps', '-A'], stdout=subprocess.PIPE)
@@ -181,7 +188,7 @@ pid = -1
 
 if __name__ == "__main__":
     try:
-        print "starting, please wait..."
+        logger.info( "starting, please wait...")
         global service
         global queue
         global parsed_path
@@ -193,27 +200,24 @@ if __name__ == "__main__":
         if args > 1: 
             if sys.argv[1] == "hdmi":
                 omxCommand = '-o hdmi'
-                print "Audo output over HDMI"
+                logger.info( "Audo output over HDMI")
         else:
             omxCommand = ''
-            print "Audio output over 3,5mm jack"
+            logger.info( "Audio output over 3,5mm jack")
         media_key = None
         parsed_path = None
         queue = Queue.Queue()
-        service = ZeroconfService(name="Raspberry Plex", port=3000, text=["machineIdentifier=pi","version=2.0"])
+        service = ZeroconfService(name="MC-4GS-HD", port=3000, text=["machineIdentifier=pi","version=2.0"])
         service.publish()
         udp = udplistener.udplistener(queue)
         udp.start()
         http = httplistener.httplistener(queue)
         http.start()
-        __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
-        f = open(os.path.join(__location__, 'image/logo.png'));
-        image = image(f)
-#        image.set()
         while True:
             try:
                 command, args = queue.get(True, 2)
                 print "Got command: %s, args: %s" %(command, args)
+                logger.info(command)
                 if not hasattr(xbmcCmmd, command):
                     print "Command %s not implemented yet" % command
                 else:
