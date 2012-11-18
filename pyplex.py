@@ -69,6 +69,7 @@ class hello:
 
 class xbmcCommands:
     def PlayMedia(self, fullpath, tag, unknown1, unknown2, unknown3):
+        global cgcmd
         global omx
         global parsed_path
         global omxCommand
@@ -98,39 +99,49 @@ class xbmcCommands:
         #if(omx):
         #    self.stop()
         #omx = OMXPlayer(mediapath, args=omxCommand, start_playback=True)
-        try:
-          sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        except socket.error, msg:
-          sys.stderr.write("[ERROR] %s\n" % msg[1])
-          sys.exit(1)
-               
-        try:
-          sock.connect(("localhost", 9010))
-        except socket.error, msg:
-          sys.stderr.write("[ERROR] %s\n" % msg[1])
-          sys.exit(2)
-                      
-        sock.send("V|%s\r\n" % (mediapath))
-                       
+        cgcmd.SendPlay(mediapath)                  
 
     def Pause(self, message):
-        global omx
-        if(omx):
-            omx.set_speed(1)
-            omx.toggle_pause()
+        global cgcmd
+        cgcmd.SendCommand(40);
 
     def Play(self, message):
-        global omx
-        if(omx):
-            ret = omx.set_speed(1)
-            if(ret == 0):
-                omx.toggle_pause()
+        global cgcmd
+        cgcmd.SendCommand(39);
 
     def Stop(self, message):
-        global omx
-        logger.info("Han mandado STOP")
-        if(omx):
-            omx.stop()
+        global cgcmd
+        cgcmd.SendCommand(41);
+
+    def Up(self, message):
+        global cgcmd
+        cgcmd.SendCommand(19);
+
+    def Down(self, message):
+        global cgcmd
+        cgcmd.SendCommand(20);
+
+    def Left(self, message):
+        global cgcmd
+        cgcmd.SendCommand(21);
+
+    def Right(self, message):
+        global cgcmd
+        cgcmd.SendCommand(22);
+        
+
+    def ParentDir(self, message):
+        global cgcmd
+        cgcmd.SendCommand(24);
+
+    def Select(self, message):
+        global cgcmd
+        cgcmd.SendCommand(23);
+
+    def OSD(self, message):
+        global cgcmd
+        cgcmd.SendCommand(2);
+
 
     def stopPyplex(self, message):
         self.stop()
@@ -160,6 +171,30 @@ class xbmcCommands:
     def BigStepBack(self, message = None):
         if(omx):
             omx.jump_rev_600()
+
+class CGCommands:
+    def SendCmd (self, command, attributes):
+        try:
+          sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        except socket.error, msg:
+          sys.stderr.write("[ERROR] %s\n" % msg[1])
+          sys.exit(1)
+               
+        try:
+          sock.connect(("localhost", 9010))
+        except socket.error, msg:
+          sys.stderr.write("[ERROR] %s\n" % msg[1])
+          sys.exit(2)
+                      
+        sock.send("%s|%s\r\n" % (command , attributes))
+
+    def SendCommand(self, message = None):
+        logger.info("SendCommand")
+        self.SendCmd("K",message)
+
+    def SendPlay(self, url = None):
+        logger.info("SendPlay")    
+        self.SendCmd("V",url)
         
 def OMXRunning():
     global pid
@@ -185,6 +220,7 @@ omx = None
 http = None
 udp = None
 pid = -1
+cgcmd = CGCommands()
 
 if __name__ == "__main__":
     try:
@@ -207,7 +243,7 @@ if __name__ == "__main__":
         media_key = None
         parsed_path = None
         queue = Queue.Queue()
-        service = ZeroconfService(name="MC-4GS-HD", port=3000, text=["machineIdentifier=pi","version=2.0"])
+        service = ZeroconfService(name="MC-4GS-HD", port=3001, text=["machineIdentifier=pi","version=2.0"])
         service.publish()
         udp = udplistener.udplistener(queue)
         udp.start()
