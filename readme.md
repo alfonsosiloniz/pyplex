@@ -7,6 +7,12 @@ could use a Plex client that had no interface, and was just designed to be
 operated using an iOS device or similar as a remote. Only the very barest bones
 functionality is here, but I hope that it is reasonably easy to extend.
 
+##Changes in this version
+
+Plex Media Server transcoding enabled by default. Subtitles now are sent to the MC4G if present in the Media Library. 
+
+TODO: Switch to select whenever to use transcondig
+
 ##Before you install
 
 	sudo apt-get update && sudo apt-get upgrade
