@@ -1,19 +1,14 @@
 import web, urllib2, re, xml.etree.cElementTree as et
+from pyomxplayer import OMXPlayer
 from urlparse import urlparse
-import avahi, dbus, sys
+import avahi, dbus, sys, platform
 from pprint import pprint
-import socket,  subprocess, signal, os, logging
+import socket, subprocess, signal, os, logging
 from threading import Thread
 import Queue
 import udplistener
 import httplistener
-
-logger = logging.getLogger('myapp')
-hdlr = logging.FileHandler('/var/log/pyplex.log')
-formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-hdlr.setFormatter(formatter)
-logger.addHandler(hdlr)
-logger.setLevel(logging.INFO)
+from plexInterface import PlexInterface
 
 __all__ = ["ZeroconfService"]
 class ZeroconfService:
@@ -50,12 +45,10 @@ class ZeroconfService:
 
         g.Commit()
         self.group = g
-        logger.info( 'Service published' )
+        print 'Service published'
 
     def unpublish(self):
         self.group.Reset()
-
-
         
 urls = (
     '/xbmcCmds/xbmcHttp','xbmcCmdsXbmcHttp',
@@ -63,117 +56,13 @@ urls = (
 )
 app = web.application(urls, globals())
 
+def string_to_lines(string):
+    return string.strip().replace('\r\n', '\n').split('\n')
+
+
 class hello:        
     def GET(self, message):
         return 'Hello, World'
-
-class xbmcCommands:
-    def PlayMedia(self, fullpath, tag, unknown1, unknown2, unknown3):
-        global cgcmd
-        global omx
-        global parsed_path
-        global omxCommand
-        global media_key
-        global duration
-        logger.info ( '---')
-        logger.info ( fullpath)
-        logger.info ( tag)
-        f = urllib2.urlopen(fullpath)
-        s = f.read()
-        f.close()
-        logger.info( s)
-        tree = et.fromstring(s)
-        #get video
-        el = tree.find('./Video/Media/Part')
-        key = tree.find('./Video')
-        key = key.attrib['ratingKey']
-        logger.info( key)
-        #print el.attrib['key']
-        logger.info(fullpath)
-        #Construct the path to the media.
-        parsed_path = urlparse(fullpath)
-        media_key = key
-        duration = int(el.attrib['duration'])
-        mediapath = parsed_path.scheme + "://" + parsed_path.netloc + el.attrib['key'] 
-        logger.info( mediapath)
-        #if(omx):
-        #    self.stop()
-        #omx = OMXPlayer(mediapath, args=omxCommand, start_playback=True)
-        cgcmd.SendPlay(mediapath)                  
-
-    def Pause(self, message):
-        global cgcmd
-        cgcmd.SendCommand(40);
-
-    def Play(self, message):
-        global cgcmd
-        cgcmd.SendCommand(39);
-
-    def Stop(self, message):
-        global cgcmd
-        cgcmd.SendCommand(41);
-
-    def Up(self, message):
-        global cgcmd
-        cgcmd.SendCommand(19);
-
-    def Down(self, message):
-        global cgcmd
-        cgcmd.SendCommand(20);
-
-    def Left(self, message):
-        global cgcmd
-        cgcmd.SendCommand(21);
-
-    def Right(self, message):
-        global cgcmd
-        cgcmd.SendCommand(22);
-        
-    def ContextMenu(self, message):
-        global cgcmd
-        cgcmd.SendCommand(17);
-
-    def ParentDir(self, message):
-        global cgcmd
-        cgcmd.SendCommand(24);
-
-    def Select(self, message):
-        global cgcmd
-        cgcmd.SendCommand(23);
-
-    def OSD(self, message):
-        global cgcmd
-        cgcmd.SendCommand(2);
-
-
-    def stopPyplex(self, message):
-        self.stop()
-        global service
-        exit()
-
-    def SkipNext(self, message = None):
-        if(omx):
-            omx.increase_speed()
-
-    def SkipPrevious(self, message = None):
-        if(omx):
-            omx.decrease_speed()
-
-    def StepForward(self, message = None):
-        if(omx):
-            omx.increase_speed()
-
-    def StepBack(self, message = None):
-        if(omx):
-            omx.decrease_speed()
-
-    def BigStepForward(self, message = None):
-        if(omx):
-            omx.jump_fwd_600()
-
-    def BigStepBack(self, message = None):
-        if(omx):
-            omx.jump_rev_600()
 
 class CGCommands:
     def SendCmd (self, command, attributes):
@@ -192,71 +81,154 @@ class CGCommands:
         sock.send("%s|%s\r\n" % (command , attributes))
 
     def SendCommand(self, message = None):
-        logger.info("SendCommand")
         self.SendCmd("K",message)
 
     def SendPlay(self, url = None):
-        logger.info("SendPlay")    
         self.SendCmd("V",url)
         
-def OMXRunning():
-    global pid
-    p = subprocess.Popen(['ps', '-A'], stdout=subprocess.PIPE)
-    out, err = p.communicate()
-    omxRunning = False
-    for line in out.splitlines():
-        if 'omxplayer' in line:
-            pid = int(line.split(None, 1)[0])
-            omxRunning = True
-    return omxRunning
 
-def getMiliseconds(s):
-    hours, minutes, seconds = (["0", "0"] + s.split(":"))[-3:]
-    hours = int(hours)
-    minutes = int(minutes)
-    seconds = float(seconds)
-    miliseconds = int(3600000 * hours + 60000 * minutes + 1000 * seconds)
-    return miliseconds
 
-xbmcCmmd = xbmcCommands()
-omx = None
+class xbmcCommands:
+    def __init__(self, omxArgs):
+        self.media = None
+        self.plex = PlexInterface()
+        self.omx = None
+        self.omxArgs = omxArgs
+        self.cgcmd = CGCommands();
+
+
+    def PlayMedia(self, fullpath, tag, unknown1, unknown2, unknown3):
+        global parsed_path
+        global media_key
+        global duration
+
+        self.media = self.plex.getMedia(fullpath)
+        
+        #print 'mediapath', mediapath
+        if(self.omx):
+            self.Stop()
+        transcodeURL = self.media.getTranscodeURL()
+        
+        f = urllib2.urlopen(transcodeURL)
+        rawXML = f.read()
+
+        f.close()
+		
+        for line in string_to_lines(rawXML):
+             line = line.strip()
+             if line.startswith("#"):
+                 sessionURL = ""
+             else:
+             	sessionURL = self.media.getTranscodeSessionURL() + line
+
+        self.cgcmd.SendPlay(sessionURL)                  
+        
+
+    def Pause(self, message):
+        self.cgcmd.SendCommand(40);
+
+    def Play(self, message):
+        self.cgcmd.SendCommand(39);
+
+    def Stop(self, message):
+        self.cgcmd.SendCommand(41);
+
+    def Up(self, message):
+        self.cgcmd.SendCommand(19);
+
+    def Down(self, message):
+        self.cgcmd.SendCommand(20);
+
+    def Left(self, message):
+        self.cgcmd.SendCommand(21);
+
+    def Right(self, message):
+        self.cgcmd.SendCommand(22);
+        
+    def ContextMenu(self, message):
+        self.cgcmd.SendCommand(17);
+
+    def ParentDir(self, message):
+        self.cgcmd.SendCommand(24);
+
+    def Select(self, message):
+        self.cgcmd.SendCommand(23);
+
+    def OSD(self, message):
+        self.cgcmd.SendCommand(2);
+        
+    def getMilliseconds(self,s):
+        hours, minutes, seconds = (["0", "0"] + ("%s" % s).split(":"))[-3:]
+        hours = int(hours)
+        minutes = int(minutes)
+        seconds = float(seconds)
+        miliseconds = int(3600000 * hours + 60000 * minutes + 1000 * seconds)
+        return miliseconds
+
+    def getPosMilli(self):
+        return self.getMilliseconds(self.omx.position)
+    
+    def setPlayed(self):
+        self.media.setPlayed()
+
+    def isFinished(self):
+        if(self.omx):
+            finished = self.omx.finished
+        else:
+            finished = True
+        return finished
+    
+    def isRunning(self):
+        if(self.omx):
+            return True
+        return False
+
+    def updatePosition(self):
+        if self.isFinished():
+            if (self.getPosMilli() > (self.media.duration * .95)):
+                self.setPlayed()
+            self.Stop()
+        else:
+            self.media.updatePosition(self.getPosMilli())
+        
+
 http = None
 udp = None
-pid = -1
-cgcmd = CGCommands()
 
 if __name__ == "__main__":
+    hostname = platform.uname()[1]
     try:
-        logger.info( "starting, please wait...")
+        print "starting, please wait..."
         global service
         global queue
         global parsed_path
         global media_key
-        global omxCommand
         global duration
         duration = 0
         args = len(sys.argv)
         if args > 1: 
             if sys.argv[1] == "hdmi":
                 omxCommand = '-o hdmi'
-                logger.info( "Audo output over HDMI")
+                print "Audo output over HDMI"
         else:
             omxCommand = ''
-            logger.info( "Audio output over 3,5mm jack")
+            print "Audio output over 3,5mm jack"
+        xbmcCmmd = xbmcCommands(omxCommand)
+
         media_key = None
         parsed_path = None
         queue = Queue.Queue()
-        service = ZeroconfService(name="MC-4GS-HD", port=3001, text=["machineIdentifier=pi","version=2.0"])
+        service = ZeroconfService(name= "MC-4GS-HD", port=3000, text=["machineIdentifier=" + hostname,"version=2.0"])
         service.publish()
         udp = udplistener.udplistener(queue)
         udp.start()
         http = httplistener.httplistener(queue)
         http.start()
+        __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
         while True:
             try:
                 command, args = queue.get(True, 2)
                 print "Got command: %s, args: %s" %(command, args)
-                logger.info(command)
                 if not hasattr(xbmcCmmd, command):
                     print "Command %s not implemented yet" % command
                 else:
@@ -266,31 +238,13 @@ if __name__ == "__main__":
                 # service.unpublish()
             except Queue.Empty:
                 pass
-            if(omx):
+            if(xbmcCmmd.isRunning()):
                 # print omx.position
-                if omx.finished:
-                    if (getMiliseconds(str(omx.position)) > (duration * .95)):
-                        setPlayed = parsed_path.scheme + "://" + parsed_path.netloc + "/:/scrobble?key=" + str(media_key) + "&identifier=com.plexapp.plugins.library"
-                        try:
-                            f = urllib2.urlopen(setPlayed)
-                        except urllib2.HTTPError:
-                            print "Failed to update plex that item was played: %s" % setPlayPos
-                            pass
-                    omx.stop()
-                    omx = None
-                    continue
-                pos = getMiliseconds(str(omx.position))
-                #TODO: make setPlayPos a function
-                setPlayPos =  parsed_path.scheme + "://" + parsed_path.netloc + '/:/progress?key=' + str(media_key) + '&identifier=com.plexapp.plugins.library&time=' + str(pos) + "&state=playing" 
-                try:
-                    f = urllib2.urlopen(setPlayPos)
-                except urllib2.HTTPError:
-                    print "Failed to update plex play time, url: %s" % setPlayPos
-                    pass
+                xbmcCmmd.updatePosition()
     except:
         print "Caught exception"
-        if(omx):
-            omx.stop()
+        if(xbmcCmmd):
+            xbmcCmmd.Stop("")
         if(udp):
             udp.stop()
             udp.join()
