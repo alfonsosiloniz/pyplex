@@ -12,6 +12,8 @@ class PlexMedia:
         f.close()
         tree = et.fromstring(rawXML)
 
+
+        print rawXML
         #get video
         self.videoTag = tree.find('./Video')
         self.mediaTag = tree.find('./Video/Media')

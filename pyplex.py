@@ -1,4 +1,4 @@
-import web, urllib2, re, xml.etree.cElementTree as et
+import urllib2, re, xml.etree.cElementTree as et
 from pyomxplayer import OMXPlayer
 from urlparse import urlparse
 import avahi, dbus, sys, platform
@@ -54,7 +54,6 @@ urls = (
     '/xbmcCmds/xbmcHttp','xbmcCmdsXbmcHttp',
     '/(.*)', 'stop', 'hello'
 )
-app = web.application(urls, globals())
 
 def string_to_lines(string):
     return string.strip().replace('\r\n', '\n').split('\n')
@@ -102,9 +101,11 @@ class xbmcCommands:
         global media_key
         global duration
 
-        self.media = self.plex.getMedia(fullpath)
+        parsed_path = urlparse(fullpath)
+        media_path = parsed_path.scheme + "://" + parsed_path.netloc + tag
+        self.media = self.plex.getMedia(media_path)
         
-        #print 'mediapath', mediapath
+        print 'mediapath', media_path
         if(self.omx):
             self.Stop()
         transcodeURL = self.media.getTranscodeURL()
